@@ -1,0 +1,30 @@
+# MCP Watchtower local policy example.
+#
+# First matching rule wins. Tool and server support shell-style wildcards.
+
+rules:
+  - match:
+      server: "filesystem"
+      tool: "*delete*"
+    action: block
+    risk: high
+    reason: "Deleting files is blocked by local policy."
+
+  - match:
+      server: "filesystem"
+      tool: "*write*"
+    action: require_approval
+    risk: medium
+    reason: "Writing files requires human approval."
+
+  - match:
+      tool: "*send*"
+    action: require_approval
+    risk: high
+    reason: "Sending data outside the run requires approval."
+
+  - match:
+      tool: "*"
+    action: allow
+    risk: low
+    reason: "Default allow for read-only or unmatched tools."

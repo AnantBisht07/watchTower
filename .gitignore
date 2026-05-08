@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Watchtower local runtime
+.watchtower/
+
+# Frontend
+web/node_modules/
+web/dist/
+web/playwright-report/
+web/test-results/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

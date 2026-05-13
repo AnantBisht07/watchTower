@@ -1,10 +1,8 @@
 # MCP Watchtower
 
-MCP Watchtower is a local-first control tower for MCP-powered agents.
+**A live control layer for MCP-powered agents.**
 
-It sits between your agent and MCP servers, records every tool-call event in SQLite, streams live run activity to a browser UI, checks MCP server health, and pauses risky tool calls behind human approval gates.
-
-The goal is simple: when an agent uses tools, you should be able to see what it is doing, which server it is calling, what Watchtower intercepted, and why a tool was approved, rejected, blocked, failed, or completed.
+MCP Watchtower sits between your agent and MCP servers, records every tool-call event in SQLite, streams live run activity to a browser UI, checks MCP server health, and pauses risky tool calls behind human approval gates.
 
 ```txt
 User task
@@ -13,9 +11,9 @@ User task
 Agent
    |
    v
-MCP Watchtower  ->  SQLite audit trail
+MCP Watchtower  ──►  SQLite audit trail
    |
-   +-> policy check / approval gate
+   +──► policy check / approval gate
    |
    v
 MCP server tool
@@ -23,6 +21,10 @@ MCP server tool
    v
 Tool result
 ```
+
+> **Status: Alpha.** Useful for demos, local development, and experimenting with safer MCP execution flows. Not yet production-ready.
+
+---
 
 ## Why This Exists
 
@@ -38,25 +40,43 @@ MCP agents can call powerful tools: filesystem writes, email sends, repository a
 
 Watchtower turns those questions into a live execution cockpit and a durable flight recorder.
 
+---
+
 ## What You Get
 
-- Live browser UI for MCP runs
-- Agent route map from user task to tool result
-- Server-Sent Events stream for run events
-- SQLite-backed audit history
-- MCP server health checks
-- Approval gates for risky tools
-- Tool lifecycle tracking: requested, started, completed, failed, timed out
-- Policy decisions: allowed, approval required, blocked
-- Demo runs for showing the experience quickly
+| Feature | Description |
+|---|---|
+| Live browser UI | Real-time control tower for MCP runs |
+| Agent route map | Visual path from user task to tool result |
+| SSE event stream | Live run events pushed to the browser |
+| SQLite audit trail | Durable, queryable history of every event |
+| MCP server health | Latency, tool count, and error status per server |
+| Approval gates | Pause risky tool calls for human review |
+| Tool lifecycle tracking | requested → started → completed / failed / timed out |
+| Policy decisions | allowed / approval required / blocked |
+| Tool reliability stats | Success/failure counts and average latency per tool |
+| Demo runs | Built-in demos to show the experience immediately |
 
-## Current Status
-
-This is an early local-first prototype. It is useful for demos, local development, and experimenting with safer MCP execution flows. Treat it as alpha software before using it around sensitive production tools.
+---
 
 ## Quickstart
 
-From the repository root:
+### macOS / Linux
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev,server]"
+
+cd web
+npm install
+npm run build
+cd ..
+
+python -m mcp_watchtower.cli demo --port 8123
+```
+
+### Windows (PowerShell)
 
 ```powershell
 python -m venv .venv
@@ -71,57 +91,65 @@ cd ..
 python -m mcp_watchtower.cli demo --port 8123
 ```
 
-Open:
+Open `http://127.0.0.1:8123/` in your browser.
 
-```txt
-http://127.0.0.1:8123/
-```
-
-If port `8123` is busy, use another port:
-
-```powershell
-python -m mcp_watchtower.cli demo --port 8124
-```
+---
 
 ## Demo Modes
 
 The UI has two built-in demo buttons.
 
-**Journey Demo**
+### Journey Demo
 
-Shows a normal MCP run with server health, tool discovery, tool request, tool result, and completed audit trail.
+Shows a normal MCP run: server health, tool discovery, tool request, and tool result, all streaming live.
 
-**Safety Demo**
+### Safety Demo
 
-Shows a risky tool call that pauses before execution:
+Shows a risky tool call that pauses for approval:
 
 ```txt
 filesystem.write_file wants to modify summary.md
 ```
 
-Watchtower stops the MCP call at the approval gate. You can choose:
+Watchtower stops the MCP call at the approval gate. You choose:
 
-- Approve and Forward
-- Reject and Block
+- **Approve and Forward** — the tool executes
+- **Reject and Block** — the tool is cancelled
+
+---
 
 ## The UI
 
 The frontend is designed as an AI Agent Control Tower and Flight Recorder.
 
-It is organized around these areas:
+```txt
+┌─────────────────────────────────────────────────────────┐
+│ MCP Watchtower          [Journey Demo] [Safety Demo]    │
+│ Run: run_abc123                         Status: Live    │
+├─────────────────────────────────────────────────────────┤
+│ Server Health                                           │
+│ ✅ github       healthy   18 tools   140ms              │
+│ ✅ filesystem   healthy    6 tools    31ms              │
+│ ❌ browser      timeout    0 tools  5000ms              │
+├────────────────────────────┬────────────────────────────┤
+│ Agent Route Map            │ Inspector                  │
+│                            │                            │
+│ Task → Agent → Watchtower  │ Tool: filesystem.write_file│
+│   → Policy → Approval      │ Risk: medium               │
+│   → MCP Server → Result    │ Input: {"path":"summary.md"}
+│                            │                            │
+│ Event Timeline             │ [Approve] [Reject]         │
+│ ✅ run_started             │                            │
+│ ✅ health_check_completed  │                            │
+│ ⏳ approval_required       │                            │
+└────────────────────────────┴────────────────────────────┘
+```
 
-- Header: product name, demo actions, compact run selector
-- Status hero: what is happening right now
-- Agent route map: user task -> agent -> Watchtower -> policy -> approval -> MCP server -> result
-- Inspector: selected event, current tool call, pending approval, and server health details
-- Audit trail: timestamped event log for the run
-- Health panel: compact MCP server health cards
+---
 
-During an approval pause, the UI makes it clear that the MCP tool has not executed yet. Watchtower has intercepted the call and is waiting for a human decision.
+## Integrating With Your Agent
 
-## Using Watchtower With Your MCP Client
-
-Your app still creates and authenticates MCP clients as usual. Watchtower wraps the client and records calls.
+Your app creates and authenticates MCP clients as usual. Watchtower wraps the client and records calls.
 
 ```python
 from mcp_watchtower import Watchtower
@@ -155,19 +183,17 @@ issues = await github.call_tool(
 
 Start the UI against the same SQLite database:
 
-```powershell
+```bash
 python -m mcp_watchtower.cli ui --db-path .watchtower/watchtower.db --port 8123
 ```
 
-Open:
+> **Note:** The CLI server and the agent must run in the same process for live SSE streaming to work. If you run them separately, the audit history will be readable but live events will not stream. This is a known limitation tracked in the roadmap.
 
-```txt
-http://127.0.0.1:8123/
-```
+---
 
 ## Approval Gates
 
-Enable default safety behavior with:
+Enable default safety behavior:
 
 ```python
 watchtower = Watchtower(
@@ -175,11 +201,7 @@ watchtower = Watchtower(
     db_path=".watchtower/watchtower.db",
     safety=True,
 )
-```
 
-Then wrap the MCP client:
-
-```python
 filesystem = watchtower.wrap_mcp_client(
     raw_filesystem_mcp_client,
     server_name="filesystem",
@@ -188,17 +210,21 @@ filesystem = watchtower.wrap_mcp_client(
 await filesystem.call_tool("write_file", {"path": "summary.md"})
 ```
 
-With `safety=True`, Watchtower classifies common state-changing tools. For example:
+With `safety=True`, Watchtower classifies tools by name pattern:
 
-- `read_*` style tools are usually allowed
-- `write_*` and `send_*` style tools can require approval
-- `delete_*` style tools can be blocked
+| Pattern | Default action |
+|---|---|
+| `*read*`, `*list*`, `*search*` | allow |
+| `*write*`, `*send*`, `*create*` | require approval |
+| `*delete*`, `*remove*` | block |
 
 When approval is required, the wrapped call waits until the UI or API approves or rejects the request.
 
+---
+
 ## Custom Policies
 
-Use a YAML policy file when you want explicit rules:
+Use a YAML policy file for explicit rules:
 
 ```python
 watchtower = Watchtower(
@@ -208,9 +234,10 @@ watchtower = Watchtower(
 )
 ```
 
-Example:
-
 ```yaml
+# watchtower.policy.yaml
+# First matching rule wins. Wildcards use shell-style fnmatch.
+
 rules:
   - match:
       server: "filesystem"
@@ -232,11 +259,11 @@ rules:
     reason: "Default allow."
 ```
 
-See `watchtower.policy.example.yaml` for a starter policy.
+See [`watchtower.policy.example.yaml`](watchtower.policy.example.yaml) for a complete starter policy.
+
+---
 
 ## HTTP API
-
-The UI uses these endpoints:
 
 ```txt
 GET  /api/runs
@@ -245,7 +272,7 @@ POST /api/runs/demo
 POST /api/runs/safety-demo
 GET  /api/runs/{run_id}
 GET  /api/runs/{run_id}/events
-GET  /api/runs/{run_id}/events/stream
+GET  /api/runs/{run_id}/events/stream     ← SSE live stream
 GET  /api/servers/health
 GET  /api/tools/reliability
 GET  /api/approvals
@@ -253,17 +280,11 @@ POST /api/approvals/{approval_id}/approve
 POST /api/approvals/{approval_id}/reject
 ```
 
-The live UI subscribes to:
-
-```txt
-GET /api/runs/{run_id}/events/stream
-```
-
-That stream emits Server-Sent Events for run, health, tool, and approval lifecycle events.
+---
 
 ## Event Lifecycle
 
-A typical safe run looks like this:
+A normal run:
 
 ```txt
 run_started
@@ -275,14 +296,14 @@ tool_call_completed
 run_completed
 ```
 
-A safety-gated run can look like this:
+A safety-gated run:
 
 ```txt
 run_started
 health_check_completed
 agent_step_started
 tool_call_requested
-approval_required
+approval_required          ← UI shows approve/reject
 tool_call_approved
 tool_call_started
 tool_call_completed
@@ -290,136 +311,144 @@ agent_step_completed
 run_completed
 ```
 
-If the user rejects the request:
+If the user rejects:
 
 ```txt
 tool_call_rejected
 run_failed
 ```
 
+---
+
 ## Frontend Development
 
-Run the React UI with Vite:
-
-```powershell
+```bash
 cd web
-npm.cmd install
-npm.cmd run dev
+npm install
+npm run dev        # dev server at http://127.0.0.1:5173/
 ```
 
-The dev server runs at:
+Vite proxies `/api` to `http://127.0.0.1:8000` during development. Run the Python backend on port 8000 or adjust `web/vite.config.ts`.
 
-```txt
-http://127.0.0.1:5173/
-```
-
-Vite proxies `/api` to:
-
-```txt
-http://127.0.0.1:8000
-```
-
-If your backend is running on another port, either run the backend on `8000` for frontend development or update `web/vite.config.ts`.
-
-For production-style local serving, build the frontend and start the Python server:
-
-```powershell
-cd web
-npm.cmd run build
-cd ..
-python -m mcp_watchtower.cli demo --port 8123
-```
+---
 
 ## Tests
 
-Python tests:
-
-```powershell
+```bash
+# Python unit and integration tests
 pytest
+
+# Frontend build check
+cd web && npm run build
+
+# Playwright end-to-end tests
+cd web && npx playwright test
 ```
 
-Frontend build:
-
-```powershell
-cd web
-npm.cmd run build
-```
-
-Playwright e2e tests:
-
-```powershell
-cd web
-npx.cmd playwright test
-```
+---
 
 ## Project Layout
 
 ```txt
 mcp_watchtower/
-  bus.py              # in-process event bus for live streams
-  cli.py              # demo/ui server commands
-  emitter.py          # event creation and persistence
-  events.py           # normalized event payload model
-  fake_runner.py      # built-in demo runs
-  health.py           # MCP health checks
-  mcp_wrapper.py      # wrapper around MCP-like clients
-  safety.py           # policy and risk classification
-  server.py           # FastAPI API and frontend server
-  storage.py          # SQLite persistence
-  watchtower.py       # main SDK entrypoint
+  bus.py              in-process event bus for live streams
+  cli.py              demo/ui server CLI commands
+  emitter.py          event normalization and persistence
+  events.py           normalized event payload model
+  fake_runner.py      built-in demo runs
+  health.py           MCP health checks
+  mcp_wrapper.py      transparent wrapper around MCP-like clients
+  safety.py           policy and risk classification
+  server.py           FastAPI API and frontend server
+  storage.py          SQLite persistence
+  watchtower.py       main SDK entrypoint
 
 web/src/
   App.tsx
-  components/         # control tower UI components
-  lib/                # API and event helpers
-  styles.css
+  components/         control tower UI components
+  lib/                API and event helpers
   types.ts
 
 docs/
-  architecture.md
-  event_model.md
-  integration.md
-  policies.md
-  sqlite_schema.md
+  architecture.md     runtime architecture and data flow
+  event_model.md      stored and streamed event payloads
+  sqlite_schema.md    SQLite tables and derived data
+  policies.md         approval policy format
+  integration.md      wrapper, health check, and API guide
+  analysis.md         full codebase analysis and improvement plan
 ```
+
+---
+
+## Roadmap
+
+### Now (v0.1 — current)
+- Live timeline streaming over SSE
+- SQLite audit trail
+- Safety approval gates
+- MCP server health checks
+- Tool reliability stats
+- React control tower UI
+
+### Next (v0.2)
+- Official `mcp` Python SDK adapter (`mcp.ClientSession` → `WatchtowerMCPClient`)
+- Replace approval polling with async event signaling
+- Implement `ui=True` to auto-start the browser UI
+- Publish to PyPI (`pip install mcp-watchtower`)
+- Cross-process live streaming (SQLite polling fallback for SSE)
+- API token authentication for approval endpoints
+
+### Later (v0.3+)
+- Argument-aware policy rules (e.g., block writes to `/etc/`)
+- OpenTelemetry export
+- Langfuse / LangSmith trace export
+- Tool reliability dashboard panel in UI
+- Multi-run orchestrator support
+
+---
 
 ## Troubleshooting
 
-**Port 8000 is already in use**
+**Port already in use**
 
-Use another port:
-
-```powershell
-python -m mcp_watchtower.cli demo --port 8123
+```bash
+python -m mcp_watchtower.cli demo --port 8124
 ```
 
-**The UI loads but demo buttons fail**
+**UI loads but demo buttons fail**
 
-You may be running the frontend dev server without the Python API server. Start the backend too:
+Start the Python backend too:
 
-```powershell
+```bash
 python -m mcp_watchtower.cli demo --port 8000
 ```
 
-**A hosted browser cannot open `127.0.0.1`**
-
-Hosted environments cannot access your local machine. Use a tunnel such as ngrok or Cloudflare Tunnel if you need a public URL.
-
 **Approval never completes**
 
-Make sure the UI is pointed at the same SQLite database as the process that created the run.
+Make sure the UI and the process that created the run share the same SQLite database path.
+
+**A hosted browser cannot open `127.0.0.1`**
+
+Use a tunnel such as ngrok or Cloudflare Tunnel if you need a public URL.
+
+---
 
 ## Documentation
 
-- `docs/architecture.md`: runtime architecture and data flow
-- `docs/event_model.md`: stored and streamed event payloads
-- `docs/sqlite_schema.md`: SQLite tables and derived data
-- `docs/policies.md`: approval policy format
-- `docs/integration.md`: wrapper, health check, and API integration guide
-- `mcp_watchtower_high_level_design.md`: original product design
-- `mcp_watchtower_research_and_stack.md`: market and stack analysis
-- `mcp_watchtower_phase_plan.md`: implementation plan
+| File | Description |
+|---|---|
+| `docs/architecture.md` | Runtime architecture and data flow |
+| `docs/event_model.md` | Stored and streamed event payloads |
+| `docs/sqlite_schema.md` | SQLite tables and derived data |
+| `docs/policies.md` | Approval policy format |
+| `docs/integration.md` | Wrapper, health check, and API guide |
+| `docs/analysis.md` | Full codebase analysis and improvement plan |
+| `mcp_watchtower_high_level_design.md` | Original product design spec |
+| `mcp_watchtower_research_and_stack.md` | Market and stack research |
+| `mcp_watchtower_phase_plan.md` | Implementation phase plan |
+
+---
 
 ## License
 
-MIT. See `LICENSE`.
+MIT. See [`LICENSE`](LICENSE).

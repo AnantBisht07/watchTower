@@ -77,6 +77,7 @@ async def run_fake_journey(emitter: EventEmitter, store: SQLiteStore, delay: flo
     )
     await asyncio.sleep(delay)
 
+    approval_id = "apv_fake_write_file"
     await emitter.emit(
         {
             "type": "approval_required",
@@ -84,10 +85,37 @@ async def run_fake_journey(emitter: EventEmitter, store: SQLiteStore, delay: flo
             "server": "filesystem",
             "tool": "write_file",
             "risk": "medium",
-            "approval_id": "apv_fake_write_file",
+            "approval_id": approval_id,
             "message": "Approval required before filesystem.write_file",
             "reason": "This tool modifies a local file.",
             "input": {"path": "summary.md", "content_preview": "# Repo Analysis..."},
+        }
+    )
+    # Auto-approve after a short pause so the Journey Demo completes cleanly.
+    await asyncio.sleep(delay * 3)
+    store.decide_approval(approval_id, "approved")
+    await emitter.emit(
+        {
+            "type": "tool_call_approved",
+            "status": "completed",
+            "server": "filesystem",
+            "tool": "write_file",
+            "approval_id": approval_id,
+            "message": "filesystem.write_file auto-approved in Journey Demo",
+            "metadata": {"decision": "approved"},
+        }
+    )
+    await asyncio.sleep(delay)
+
+    await emitter.emit(
+        {
+            "type": "tool_call_completed",
+            "status": "completed",
+            "server": "filesystem",
+            "tool": "write_file",
+            "latency_ms": 120,
+            "message": "filesystem.write_file completed",
+            "output_summary": {"type": "object", "keys": ["written"]},
         }
     )
     await asyncio.sleep(delay)

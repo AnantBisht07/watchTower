@@ -29,7 +29,6 @@ class WatchtowerMCPClient:
         server_metadata: dict[str, Any] | None = None,
         safety_policy: SafetyPolicy | None = None,
         approval_timeout_s: float = 300,
-        approval_poll_interval_s: float = 0.25,
     ) -> None:
         self._client = client
         self._emitter = emitter
@@ -37,7 +36,6 @@ class WatchtowerMCPClient:
         self._server_metadata = server_metadata or {}
         self._safety_policy = safety_policy
         self._approval_timeout_s = approval_timeout_s
-        self._approval_poll_interval_s = approval_poll_interval_s
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._client, name)
@@ -223,27 +221,33 @@ class WatchtowerMCPClient:
         raise ToolRejectedError(f"Tool call rejected: {self._display_tool(tool_name)}")
 
     async def _wait_for_approval(self, approval_id: str) -> dict[str, Any]:
-        deadline = perf_counter() + self._approval_timeout_s
-        while perf_counter() < deadline:
-            approval = self._emitter.store.get_approval(approval_id)
-            if approval and approval["status"] in {"approved", "rejected"}:
-                return approval
-            await asyncio.sleep(self._approval_poll_interval_s)
-
-        await self._emitter.emit(
-            {
-                "type": "tool_call_rejected",
-                "status": "failed",
-                "approval_id": approval_id,
-                "message": "Approval timed out",
-                "error": {
-                    "code": "APPROVAL_TIMEOUT",
-                    "detail": f"No decision after {self._approval_timeout_s} seconds.",
-                },
-                "metadata": self._metadata(safety_action="require_approval"),
-            }
+        # Block on asyncio.Event — zero polling, instant on decision.
+        status = await self._emitter.bus.wait_for_approval(
+            approval_id, timeout=self._approval_timeout_s
         )
-        raise ApprovalTimeoutError(f"approval timed out: {approval_id}")
+        await self._emitter.bus.cleanup_approval(approval_id)
+
+        if status == "timeout":
+            await self._emitter.emit(
+                {
+                    "type": "tool_call_rejected",
+                    "status": "failed",
+                    "approval_id": approval_id,
+                    "message": "Approval timed out",
+                    "error": {
+                        "code": "APPROVAL_TIMEOUT",
+                        "detail": f"No decision after {self._approval_timeout_s} seconds.",
+                    },
+                    "metadata": self._metadata(safety_action="require_approval"),
+                }
+            )
+            raise ApprovalTimeoutError(f"approval timed out: {approval_id}")
+
+        # Return the persisted approval record for the caller.
+        approval = self._emitter.store.get_approval(approval_id)
+        if approval is None:
+            raise RuntimeError(f"approval record missing after signal: {approval_id}")
+        return approval
 
     def _display_tool(self, tool_name: str) -> str:
         return f"{self._server_name}.{tool_name}" if self._server_name else tool_name

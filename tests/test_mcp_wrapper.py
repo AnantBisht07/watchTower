@@ -95,8 +95,7 @@ def test_wrapper_waits_for_approval_before_state_changing_tool(tmp_path: Path) -
             server_name="filesystem",
             safety_policy=SafetyPolicy(),
             approval_timeout_s=2,
-            approval_poll_interval_s=0.01,
-        )
+                    )
 
         task = asyncio.create_task(client.call_tool("write_file", {"path": "summary.md"}))
         approval = await wait_for_approval(store, created_run["run_id"])
@@ -134,8 +133,7 @@ def test_wrapper_rejects_state_changing_tool_without_calling_client(tmp_path: Pa
             server_name="filesystem",
             safety_policy=SafetyPolicy(),
             approval_timeout_s=2,
-            approval_poll_interval_s=0.01,
-        )
+                    )
 
         task = asyncio.create_task(client.call_tool("write_file", {"path": "summary.md"}))
         approval = await wait_for_approval(store, created_run["run_id"])

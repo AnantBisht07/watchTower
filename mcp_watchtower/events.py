@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -9,6 +10,31 @@ from uuid import uuid4
 
 
 EventDict = dict[str, Any]
+
+KNOWN_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        "run_started",
+        "run_completed",
+        "run_failed",
+        "agent_started",
+        "agent_step_started",
+        "agent_step_completed",
+        "agent_completed",
+        "agent_failed",
+        "health_check_started",
+        "health_check_completed",
+        "health_check_failed",
+        "tools_discovered",
+        "tool_call_requested",
+        "tool_call_started",
+        "tool_call_completed",
+        "tool_call_failed",
+        "tool_call_timeout",
+        "tool_call_approved",
+        "tool_call_rejected",
+        "approval_required",
+    }
+)
 
 
 def utc_now_iso() -> str:
@@ -71,12 +97,19 @@ class WatchtowerEvent:
         return data
 
 
-def normalize_event(run_id: str, payload: EventDict) -> WatchtowerEvent:
+def normalize_event(run_id: str, payload: EventDict, strict: bool = False) -> WatchtowerEvent:
     required = ("type", "status", "message")
     missing = [key for key in required if not payload.get(key)]
     if missing:
         joined = ", ".join(missing)
         raise ValueError(f"event payload missing required field(s): {joined}")
+
+    event_type = payload["type"]
+    if event_type not in KNOWN_EVENT_TYPES:
+        msg = f"unknown event type '{event_type}' — add it to KNOWN_EVENT_TYPES if intentional"
+        if strict:
+            raise ValueError(msg)
+        warnings.warn(msg, stacklevel=3)
 
     return WatchtowerEvent(
         event_id=payload.get("event_id") or new_id("evt"),

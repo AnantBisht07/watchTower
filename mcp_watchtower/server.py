@@ -26,12 +26,9 @@ class WatchtowerRuntime:
         return EventEmitter(run_id, self.store, self.bus)
 
 
-runtime = WatchtowerRuntime(os.environ.get("WATCHTOWER_DB_PATH"))
-
-
-def create_app(app_runtime: WatchtowerRuntime | None = None):
+def create_app(app_runtime: WatchtowerRuntime | None = None, api_token: str | None = None):
     try:
-        from fastapi import FastAPI, HTTPException
+        from fastapi import Depends, FastAPI, HTTPException, Request
         from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
         from fastapi.staticfiles import StaticFiles
     except ImportError as exc:  # pragma: no cover - exercised only without server deps.
@@ -40,7 +37,21 @@ def create_app(app_runtime: WatchtowerRuntime | None = None):
             'python -m pip install -e ".[server]"'
         ) from exc
 
-    active_runtime = app_runtime or runtime
+    _token = api_token or os.environ.get("WATCHTOWER_API_TOKEN")
+
+    async def require_auth(request: Request) -> None:
+        if not _token:
+            return  # Auth disabled — local-only default
+        auth = request.headers.get("Authorization", "")
+        if auth != f"Bearer {_token}":
+            raise HTTPException(status_code=401, detail="invalid or missing API token")
+
+    if app_runtime is None:
+        raise RuntimeError(
+            "create_app() requires an explicit WatchtowerRuntime. "
+            "Use the CLI or pass app_runtime directly."
+        )
+    active_runtime = app_runtime
     app = FastAPI(title="MCP Watchtower", version="0.1.0")
     web_dist = Path(__file__).resolve().parent.parent / "web" / "dist"
 
@@ -54,7 +65,7 @@ def create_app(app_runtime: WatchtowerRuntime | None = None):
         return active_runtime.store.list_runs()
 
     @app.post("/api/runs")
-    async def create_run(payload: dict | None = None) -> dict:
+    async def create_run(payload: dict | None = None, _: None = Depends(require_auth)) -> dict:
         payload = payload or {}
         run = active_runtime.create_run(
             app_name=payload.get("app_name", "watchtower-demo"),
@@ -63,14 +74,14 @@ def create_app(app_runtime: WatchtowerRuntime | None = None):
         return run
 
     @app.post("/api/runs/demo")
-    async def create_demo_run() -> dict:
+    async def create_demo_run(_: None = Depends(require_auth)) -> dict:
         run = active_runtime.create_run(app_name="fake-agent-demo", task="Show a live MCP journey")
         emitter = active_runtime.emitter_for(run["run_id"])
         asyncio.create_task(run_fake_journey(emitter, active_runtime.store))
         return run
 
     @app.post("/api/runs/safety-demo")
-    async def create_safety_demo_run() -> dict:
+    async def create_safety_demo_run(_: None = Depends(require_auth)) -> dict:
         run = active_runtime.create_run(
             app_name="safety-gate-demo",
             task="Pause a real wrapped tool call until approval",
@@ -102,15 +113,30 @@ def create_app(app_runtime: WatchtowerRuntime | None = None):
 
         async def event_stream() -> AsyncIterator[str]:
             queue = await active_runtime.bus.subscribe(run_id)
+            seen_ids: set[str] = set()
+
             try:
+                # Always replay history first (works in both in-process and cross-process).
                 for event in active_runtime.store.list_events(run_id):
+                    seen_ids.add(event["event_id"])
                     yield _sse(event["type"], event)
+
                 while True:
                     try:
-                        event = await asyncio.wait_for(queue.get(), timeout=15)
-                        yield _sse(event["type"], event)
+                        # In-process path: event arrives via EventBus (zero latency).
+                        event = await asyncio.wait_for(queue.get(), timeout=0.5)
+                        if event["event_id"] not in seen_ids:
+                            seen_ids.add(event["event_id"])
+                            yield _sse(event["type"], event)
                     except asyncio.TimeoutError:
-                        yield ": keep-alive\n\n"
+                        # Cross-process fallback: poll SQLite for new rows.
+                        new_events = active_runtime.store.list_events_after(run_id, seen_ids)
+                        if new_events:
+                            for event in new_events:
+                                seen_ids.add(event["event_id"])
+                                yield _sse(event["type"], event)
+                        else:
+                            yield ": keep-alive\n\n"
             finally:
                 await active_runtime.bus.unsubscribe(run_id, queue)
 
@@ -132,11 +158,11 @@ def create_app(app_runtime: WatchtowerRuntime | None = None):
         return active_runtime.store.list_approvals(run_id=run_id)
 
     @app.post("/api/approvals/{approval_id}/approve")
-    async def approve(approval_id: str) -> dict:
+    async def approve(approval_id: str, _: None = Depends(require_auth)) -> dict:
         return await _decide_approval(approval_id, "approved")
 
     @app.post("/api/approvals/{approval_id}/reject")
-    async def reject(approval_id: str) -> dict:
+    async def reject(approval_id: str, _: None = Depends(require_auth)) -> dict:
         return await _decide_approval(approval_id, "rejected")
 
     async def _decide_approval(approval_id: str, decision: str) -> dict:
@@ -240,4 +266,3 @@ def _fallback_html() -> str:
     """
 
 
-app = create_app()

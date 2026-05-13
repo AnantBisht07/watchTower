@@ -198,6 +198,26 @@ class SQLiteStore:
             ).fetchall()
         return [json.loads(row["raw_json"]) for row in rows]
 
+    def list_events_after(self, run_id: str, seen_ids: set[str]) -> list[EventDict]:
+        """Return events for run_id whose event_id is not in seen_ids.
+
+        Used by the cross-process SSE fallback to detect rows written by another process.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                select raw_json from events
+                 where run_id = ?
+                 order by rowid asc
+                """,
+                (run_id,),
+            ).fetchall()
+        return [
+            json.loads(row["raw_json"])
+            for row in rows
+            if json.loads(row["raw_json"]).get("event_id") not in seen_ids
+        ]
+
     def get_latest_server_metadata(self, server: str) -> dict[str, Any]:
         with self._lock:
             rows = self._conn.execute(

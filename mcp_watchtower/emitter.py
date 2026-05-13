@@ -2,19 +2,36 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .bus import EventBus
 from .events import EventDict, normalize_event
 from .storage import SQLiteStore
 
+if TYPE_CHECKING:
+    from .redaction import Redactor
+
 
 class EventEmitter:
-    def __init__(self, run_id: str, store: SQLiteStore, bus: EventBus) -> None:
+    def __init__(
+        self,
+        run_id: str,
+        store: SQLiteStore,
+        bus: EventBus,
+        redactor: "Redactor | None" = None,
+    ) -> None:
         self.run_id = run_id
         self.store = store
         self.bus = bus
+        self._redactor = redactor
 
     async def emit(self, payload: EventDict) -> EventDict:
         event = normalize_event(self.run_id, payload).to_dict()
+
+        # Scrub secrets before anything hits SQLite or the SSE stream.
+        if self._redactor is not None:
+            event = self._redactor.scrub(event)
+
         self.store.append_event(event)
 
         if event["type"] == "run_completed":
@@ -29,6 +46,10 @@ class EventEmitter:
                 risk=event.get("risk"),
                 reason=event.get("reason") or event["message"],
             )
+            await self.bus.register_approval(event["approval_id"])
+        elif event["type"] in {"tool_call_approved", "tool_call_rejected"} and event.get("approval_id"):
+            decision = "approved" if event["type"] == "tool_call_approved" else "rejected"
+            await self.bus.signal_approval(event["approval_id"], decision)
         elif event["type"] in {"tool_call_completed", "tool_call_failed", "tool_call_timeout"}:
             self.store.record_tool_event(event)
 

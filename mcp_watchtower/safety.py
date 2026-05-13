@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
@@ -17,13 +17,15 @@ class RiskDecision:
     reason: str
 
 
-@dataclass(slots=True)
+@dataclass
 class PolicyRule:
     tool: str
     action: str
     risk: str
     reason: str
     server: str = "*"
+    # Optional argument-level matchers: {arg_key: fnmatch_pattern}
+    arguments: dict[str, str] = field(default_factory=dict)
 
 
 class SafetyPolicy:
@@ -49,6 +51,11 @@ class SafetyPolicy:
             if action not in {"allow", "require_approval", "block"}:
                 raise ValueError(f"policy rule {index} has invalid action: {action}")
 
+            arg_matchers: dict[str, str] = {}
+            raw_args = match.get("arguments")
+            if isinstance(raw_args, dict):
+                arg_matchers = {str(k): str(v) for k, v in raw_args.items()}
+
             rules.append(
                 PolicyRule(
                     server=match.get("server", "*"),
@@ -56,6 +63,7 @@ class SafetyPolicy:
                     action=action,
                     risk=risk,
                     reason=raw_rule.get("reason") or f"Matched policy rule {index}.",
+                    arguments=arg_matchers,
                 )
             )
 
@@ -63,13 +71,34 @@ class SafetyPolicy:
             raise ValueError("policy must contain at least one rule")
         return cls(rules)
 
-    def classify_tool(self, server: str | None, tool: str, arguments: dict | None = None) -> RiskDecision:
-        del arguments
+    def classify_tool(
+        self,
+        server: str | None,
+        tool: str,
+        arguments: dict[str, Any] | None = None,
+    ) -> RiskDecision:
         server_name = server or ""
+        args = arguments or {}
         for rule in self.rules:
-            if fnmatchcase(server_name, rule.server) and fnmatchcase(tool, rule.tool):
-                return RiskDecision(rule.action, rule.risk, rule.reason)
+            if not fnmatchcase(server_name, rule.server):
+                continue
+            if not fnmatchcase(tool, rule.tool):
+                continue
+            if rule.arguments and not _match_arguments(args, rule.arguments):
+                continue
+            return RiskDecision(rule.action, rule.risk, rule.reason)
         return RiskDecision("allow", "low", "No policy rule matched.")
+
+
+def _match_arguments(actual: dict[str, Any], matchers: dict[str, str]) -> bool:
+    """Return True only if every matcher key is present and its value matches."""
+    for key, pattern in matchers.items():
+        value = actual.get(key)
+        if value is None:
+            return False
+        if not fnmatchcase(str(value), pattern):
+            return False
+    return True
 
 
 def default_rules() -> list[PolicyRule]:

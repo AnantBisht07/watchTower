@@ -97,6 +97,13 @@ def create_app(app_runtime: WatchtowerRuntime | None = None, api_token: str | No
             raise HTTPException(status_code=404, detail="run not found")
         return run
 
+    @app.post("/api/runs/{run_id}/emit")
+    async def emit_event(run_id: str, payload: dict, _: None = Depends(require_auth)) -> dict:
+        if not active_runtime.store.get_run(run_id):
+            raise HTTPException(status_code=404, detail="run not found")
+        emitter = active_runtime.emitter_for(run_id)
+        return await emitter.emit(payload)
+
     @app.get("/api/runs/{run_id}/events")
     async def list_events(run_id: str) -> dict:
         if not active_runtime.store.get_run(run_id):

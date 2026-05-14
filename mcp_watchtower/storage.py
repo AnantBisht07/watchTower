@@ -11,6 +11,79 @@ from typing import Any
 from .events import EventDict, new_id, utc_now_iso
 
 
+_MIGRATIONS: list[str] = [
+    # v1 — baseline schema (tables that existed before versioning was added)
+    """
+    create table if not exists runs (
+        run_id text primary key,
+        app_name text not null,
+        task text,
+        status text not null,
+        started_at text not null,
+        completed_at text
+    );
+    create table if not exists events (
+        event_id text primary key,
+        run_id text not null,
+        parent_event_id text,
+        type text not null,
+        timestamp text not null,
+        status text not null,
+        message text not null,
+        server text,
+        transport text,
+        tool text,
+        latency_ms integer,
+        risk text,
+        approval_id text,
+        input_json text,
+        output_summary_json text,
+        error_json text,
+        metadata_json text not null,
+        raw_json text not null,
+        foreign key(run_id) references runs(run_id)
+    );
+    create index if not exists idx_events_run_time
+        on events(run_id, timestamp, event_id);
+    create table if not exists mcp_servers (
+        server text primary key,
+        run_id text,
+        status text not null,
+        tools_count integer not null default 0,
+        latency_ms integer,
+        last_checked_at text,
+        last_error text
+    );
+    create table if not exists approvals (
+        approval_id text primary key,
+        run_id text not null,
+        event_id text,
+        status text not null,
+        risk text,
+        reason text,
+        decision text,
+        decided_at text,
+        created_at text not null
+    );
+    create table if not exists mcp_tool_stats (
+        server text not null,
+        tool text not null,
+        success_count integer not null default 0,
+        failure_count integer not null default 0,
+        timeout_count integer not null default 0,
+        total_latency_ms integer not null default 0,
+        last_latency_ms integer,
+        last_status text,
+        last_error text,
+        last_called_at text,
+        primary key(server, tool)
+    );
+    """,
+    # v2 — add reason column to events (if not already present via raw_json)
+    "select 1;",  # placeholder — extend here for future schema changes
+]
+
+
 class SQLiteStore:
     def __init__(self, db_path: str | Path | None = None) -> None:
         self.db_path = Path(db_path or ".watchtower/watchtower.db")
@@ -24,82 +97,42 @@ class SQLiteStore:
         with self._lock:
             self._conn.close()
 
+    def _current_version(self) -> int:
+        try:
+            row = self._conn.execute(
+                "select version from schema_version order by version desc limit 1"
+            ).fetchone()
+            return int(row[0]) if row else 0
+        except sqlite3.OperationalError:
+            return 0
+
     def _init_schema(self) -> None:
         with self._lock:
-            self._conn.executescript(
+            self._conn.execute(
                 """
-                create table if not exists runs (
-                    run_id text primary key,
-                    app_name text not null,
-                    task text,
-                    status text not null,
-                    started_at text not null,
-                    completed_at text
-                );
-
-                create table if not exists events (
-                    event_id text primary key,
-                    run_id text not null,
-                    parent_event_id text,
-                    type text not null,
-                    timestamp text not null,
-                    status text not null,
-                    message text not null,
-                    server text,
-                    transport text,
-                    tool text,
-                    latency_ms integer,
-                    risk text,
-                    approval_id text,
-                    input_json text,
-                    output_summary_json text,
-                    error_json text,
-                    metadata_json text not null,
-                    raw_json text not null,
-                    foreign key(run_id) references runs(run_id)
-                );
-
-                create index if not exists idx_events_run_time
-                    on events(run_id, timestamp, event_id);
-
-                create table if not exists mcp_servers (
-                    server text primary key,
-                    run_id text,
-                    status text not null,
-                    tools_count integer not null default 0,
-                    latency_ms integer,
-                    last_checked_at text,
-                    last_error text
-                );
-
-                create table if not exists approvals (
-                    approval_id text primary key,
-                    run_id text not null,
-                    event_id text,
-                    status text not null,
-                    risk text,
-                    reason text,
-                    decision text,
-                    decided_at text,
-                    created_at text not null
-                );
-
-                create table if not exists mcp_tool_stats (
-                    server text not null,
-                    tool text not null,
-                    success_count integer not null default 0,
-                    failure_count integer not null default 0,
-                    timeout_count integer not null default 0,
-                    total_latency_ms integer not null default 0,
-                    last_latency_ms integer,
-                    last_status text,
-                    last_error text,
-                    last_called_at text,
-                    primary key(server, tool)
-                );
+                create table if not exists schema_version (
+                    version integer primary key,
+                    applied_at text not null
+                )
                 """
             )
             self._conn.commit()
+
+            current = self._current_version()
+            for idx, migration_sql in enumerate(_MIGRATIONS):
+                version = idx + 1
+                if version <= current:
+                    continue
+                self._conn.executescript(migration_sql)
+                self._conn.execute(
+                    "insert or ignore into schema_version(version, applied_at) values (?, ?)",
+                    (version, utc_now_iso()),
+                )
+                self._conn.commit()
+
+    def schema_version(self) -> int:
+        with self._lock:
+            return self._current_version()
 
     def create_run(self, app_name: str, task: str | None = None) -> dict[str, Any]:
         run_id = new_id("run")

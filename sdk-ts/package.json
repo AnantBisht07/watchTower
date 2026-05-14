@@ -1,0 +1,32 @@
+{
+  "name": "mcp-watchtower",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for MCP Watchtower — emit agent events and wrap MCP tool calls",
+  "keywords": ["mcp", "observability", "agents", "watchtower", "llm"],
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AnantBisht07/watchTower.git"
+  }
+}

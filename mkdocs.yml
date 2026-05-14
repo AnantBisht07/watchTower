@@ -1,0 +1,61 @@
+site_name: MCP Watchtower
+site_description: A live control layer for MCP-powered agents
+site_url: https://anantbisht07.github.io/watchTower
+repo_url: https://github.com/AnantBisht07/watchTower
+repo_name: AnantBisht07/watchTower
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - search.highlight
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Quickstart: quickstart.md
+      - Architecture: architecture.md
+  - Guides:
+      - Integration: integration.md
+      - Policies: policies.md
+      - Event Model: event_model.md
+      - SQLite Schema: sqlite_schema.md
+  - Integrations:
+      - Claude Desktop: integrations/claude-desktop.md
+      - Cline (VS Code): integrations/cline.md
+      - Cursor: integrations/cursor.md
+      - OpenAI Agents SDK: integrations/openai-agents-sdk.md
+  - Reference:
+      - Analysis: analysis.md
+      - Improvement Plan: improvement_plan.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/AnantBisht07/watchTower

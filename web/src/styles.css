@@ -625,6 +625,111 @@ dd {
   font-size: 12px;
 }
 
+.reliabilityPanel {
+  padding: 14px;
+}
+
+.reliabilityHeader {
+  margin-bottom: 12px;
+}
+
+.reliabilityHeader h2 {
+  font-size: 16px;
+}
+
+.reliabilityEmpty {
+  align-items: center;
+  color: var(--text-faint);
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  padding: 12px 4px;
+}
+
+.reliabilityTable {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.reliabilityRow {
+  align-items: center;
+  border-radius: calc(var(--radius) - 2px);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 90px 140px 100px;
+  padding: 8px 10px;
+}
+
+.reliabilityHeading {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.reliabilityRow:not(.reliabilityHeading):hover {
+  background: rgba(5, 8, 18, 0.28);
+}
+
+.reliabilityTool {
+  align-items: center;
+  display: flex;
+  font-size: 13px;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.reliabilityTool strong {
+  color: var(--text);
+  font-weight: 720;
+}
+
+.reliabilityTool span {
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reliabilityDot {
+  color: var(--border) !important;
+  flex-shrink: 0;
+}
+
+.reliabilityRate {
+  align-items: center;
+  border-radius: 4px;
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 4px;
+  padding: 2px 6px;
+  width: fit-content;
+}
+
+.reliabilityRate.success { color: var(--success); }
+.reliabilityRate.warning { color: var(--warning); }
+.reliabilityRate.danger  { color: var(--danger); }
+
+.reliabilityCalls {
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+}
+
+.reliabilityCalls .success { color: var(--success); }
+.reliabilityCalls .danger  { color: var(--danger); }
+.reliabilityCalls .warning { color: var(--warning); }
+.reliabilityCalls .neutral { color: var(--text-faint); }
+
+.reliabilityLatency {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .controlGrid {
   align-items: start;
   display: grid;

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .bus import EventBus
 from .events import EventDict, normalize_event
@@ -10,6 +10,7 @@ from .storage import SQLiteStore
 
 if TYPE_CHECKING:
     from .redaction import Redactor
+    from .webhooks import WebhookDispatcher
 
 
 class EventEmitter:
@@ -19,11 +20,15 @@ class EventEmitter:
         store: SQLiteStore,
         bus: EventBus,
         redactor: "Redactor | None" = None,
+        exporters: "list[Any] | None" = None,
+        webhook_dispatcher: "WebhookDispatcher | None" = None,
     ) -> None:
         self.run_id = run_id
         self.store = store
         self.bus = bus
         self._redactor = redactor
+        self._exporters = exporters or []
+        self._webhook_dispatcher = webhook_dispatcher
 
     async def emit(self, payload: EventDict) -> EventDict:
         event = normalize_event(self.run_id, payload).to_dict()
@@ -54,4 +59,16 @@ class EventEmitter:
             self.store.record_tool_event(event)
 
         await self.bus.publish(self.run_id, event)
+
+        # Fire exporters (sync, best-effort)
+        for exporter in self._exporters:
+            try:
+                exporter.on_event(event)
+            except Exception:
+                pass
+
+        # Fire webhooks (sync, fire-and-forget, no blocking)
+        if self._webhook_dispatcher is not None:
+            self._webhook_dispatcher.dispatch(event)
+
         return event

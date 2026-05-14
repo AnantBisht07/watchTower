@@ -5,12 +5,14 @@ import { EventTimeline } from "./components/EventTimeline";
 import { Header } from "./components/Header";
 import { HealthPanel } from "./components/HealthPanel";
 import { InspectorPanel } from "./components/InspectorPanel";
+import { ReliabilityPanel } from "./components/ReliabilityPanel";
 import { RunHero } from "./components/RunHero";
 import {
   decideApproval as decideApprovalRequest,
   getRunEvents,
   listHealth,
   listRuns,
+  listToolReliability,
   startJourneyDemo,
   startSafetyDemo
 } from "./lib/api";
@@ -23,13 +25,14 @@ import {
   isHealthEvent,
   upsertRun
 } from "./lib/eventUtils";
-import type { Health, Run, WatchtowerEvent } from "./types";
+import type { Health, Run, ToolReliability, WatchtowerEvent } from "./types";
 
 export function App() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [activeRun, setActiveRun] = useState<Run | null>(null);
   const [events, setEvents] = useState<WatchtowerEvent[]>([]);
   const [health, setHealth] = useState<Health[]>([]);
+  const [reliability, setReliability] = useState<ToolReliability[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [approvalBusy, setApprovalBusy] = useState<string | null>(null);
   const [healthRefreshing, setHealthRefreshing] = useState(false);
@@ -41,10 +44,15 @@ export function App() {
 
     async function boot() {
       try {
-        const [nextRuns, nextHealth] = await Promise.all([listRuns(), listHealth()]);
+        const [nextRuns, nextHealth, nextReliability] = await Promise.all([
+          listRuns(),
+          listHealth(),
+          listToolReliability(),
+        ]);
         if (!mounted) return;
         setRuns(nextRuns);
         setHealth(nextHealth);
+        setReliability(nextReliability);
         if (nextRuns[0]) {
           await openRun(nextRuns[0]);
         }
@@ -107,6 +115,14 @@ export function App() {
         });
 
         if (isHealthEvent(payload)) void refreshHealth();
+
+        if (
+          payload.type === "tool_call_completed" ||
+          payload.type === "tool_call_failed" ||
+          payload.type === "tool_call_timeout"
+        ) {
+          void listToolReliability().then(setReliability).catch(() => undefined);
+        }
 
         if (payload.type === "run_completed" || payload.type === "run_failed") {
           const status = payload.type === "run_completed" ? "completed" : "failed";
@@ -188,6 +204,7 @@ export function App() {
         <>
           <EmptyState onStartDemo={() => void handleStartDemo()} onStartSafetyDemo={() => void handleStartSafetyDemo()} />
           <HealthPanel health={health} refreshing={healthRefreshing} onRefresh={() => void refreshHealth()} />
+          <ReliabilityPanel reliability={reliability} />
         </>
       ) : (
         <>
@@ -202,6 +219,7 @@ export function App() {
             onDecision={handleDecision}
           />
           <HealthPanel health={health} refreshing={healthRefreshing} onRefresh={() => void refreshHealth()} />
+          <ReliabilityPanel reliability={reliability} />
           <div className="controlGrid">
             <div className="primaryStack">
               <AgentRouteMap nodes={routeNodes} />

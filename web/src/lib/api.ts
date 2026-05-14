@@ -1,4 +1,4 @@
-import type { Health, Run, RunEventsResponse } from "../types";
+import type { Health, Run, RunEventsResponse, ToolReliability } from "../types";
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
@@ -30,4 +30,8 @@ export function startSafetyDemo() {
 
 export function decideApproval(approvalId: string, decision: "approve" | "reject") {
   return requestJson<unknown>(`/api/approvals/${approvalId}/${decision}`, { method: "POST" });
+}
+
+export function listToolReliability() {
+  return requestJson<ToolReliability[]>("/api/tools/reliability");
 }

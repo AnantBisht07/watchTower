@@ -85,3 +85,17 @@ export type TimelineItem = {
   badge?: string;
   important?: boolean;
 };
+
+export type ToolReliability = {
+  server: string;
+  tool: string;
+  success_count: number;
+  failure_count: number;
+  timeout_count: number;
+  total_latency_ms: number;
+  last_latency_ms?: number | null;
+  avg_latency_ms: number;
+  last_status?: string | null;
+  last_error?: string | null;
+  last_called_at?: string | null;
+};

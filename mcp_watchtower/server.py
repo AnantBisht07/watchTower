@@ -156,6 +156,10 @@ def create_app(app_runtime: WatchtowerRuntime | None = None, api_token: str | No
             item["metadata"] = active_runtime.store.get_latest_server_metadata(item["server"])
         return health
 
+    @app.get("/api/events/recent")
+    async def list_recent_events(limit: int = 30) -> list[dict]:
+        return active_runtime.store.list_recent_events(limit=min(limit, 100))
+
     @app.get("/api/tools/reliability")
     async def list_tool_reliability() -> list[dict]:
         return active_runtime.store.list_tool_reliability()

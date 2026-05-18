@@ -1,4 +1,4 @@
-import type { Health, Run, RunEventsResponse, ToolReliability } from "../types";
+import type { Approval, Health, Run, RunEventsResponse, ToolReliability, WatchtowerEvent } from "../types";
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
@@ -20,6 +20,19 @@ export function listHealth() {
   return requestJson<Health[]>("/api/servers/health");
 }
 
+export function listApprovals(runId?: string) {
+  const qs = runId ? `?run_id=${encodeURIComponent(runId)}` : "";
+  return requestJson<Approval[]>(`/api/approvals${qs}`);
+}
+
+export function listToolReliability() {
+  return requestJson<ToolReliability[]>("/api/tools/reliability");
+}
+
+export function listRecentEvents(limit = 30) {
+  return requestJson<WatchtowerEvent[]>(`/api/events/recent?limit=${limit}`);
+}
+
 export function startJourneyDemo() {
   return requestJson<Run>("/api/runs/demo", { method: "POST" });
 }
@@ -30,8 +43,4 @@ export function startSafetyDemo() {
 
 export function decideApproval(approvalId: string, decision: "approve" | "reject") {
   return requestJson<unknown>(`/api/approvals/${approvalId}/${decision}`, { method: "POST" });
-}
-
-export function listToolReliability() {
-  return requestJson<ToolReliability[]>("/api/tools/reliability");
 }

@@ -1,252 +1,160 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { AgentRouteMap } from "./components/AgentRouteMap";
-import { EmptyState } from "./components/EmptyState";
-import { EventTimeline } from "./components/EventTimeline";
-import { Header } from "./components/Header";
-import { HealthPanel } from "./components/HealthPanel";
-import { InspectorPanel } from "./components/InspectorPanel";
-import { ReliabilityPanel } from "./components/ReliabilityPanel";
-import { RunHero } from "./components/RunHero";
-import {
-  decideApproval as decideApprovalRequest,
-  getRunEvents,
-  listHealth,
-  listRuns,
-  listToolReliability,
-  startJourneyDemo,
-  startSafetyDemo
-} from "./lib/api";
-import {
-  eventTypes,
-  getPendingApproval,
-  getPrimaryToolCall,
-  getRouteNodes,
-  getRunMode,
-  isHealthEvent,
-  upsertRun
-} from "./lib/eventUtils";
-import type { Health, Run, ToolReliability, WatchtowerEvent } from "./types";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { PendingBanner } from "./components/PendingBanner";
+import { SideNav, type NavView } from "./components/SideNav";
+import { listApprovals, listHealth, listRecentEvents, listRuns, listToolReliability, decideApproval } from "./lib/api";
+import { ApprovalsPage } from "./pages/ApprovalsPage";
+import { MissionControlPage } from "./pages/MissionControlPage";
+import { PoliciesPage } from "./pages/PoliciesPage";
+import { RunsPage } from "./pages/RunsPage";
+import { ServersPage } from "./pages/ServersPage";
+import { SettingsPage } from "./pages/SettingsPage";
+import type { Approval, Health, Run, ToolReliability, WatchtowerEvent } from "./types";
+
+const POLL_MS = 8_000;
 
 export function App() {
+  const [view, setView] = useState<NavView>("mission");
+
+  // ── Global shared state ──────────────────────────────────────────────
   const [runs, setRuns] = useState<Run[]>([]);
-  const [activeRun, setActiveRun] = useState<Run | null>(null);
-  const [events, setEvents] = useState<WatchtowerEvent[]>([]);
   const [health, setHealth] = useState<Health[]>([]);
+  const [approvals, setApprovals] = useState<Approval[]>([]);
   const [reliability, setReliability] = useState<ToolReliability[]>([]);
-  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
-  const [approvalBusy, setApprovalBusy] = useState<string | null>(null);
+  const [recentEvents, setRecentEvents] = useState<WatchtowerEvent[]>([]);
   const [healthRefreshing, setHealthRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const streamRef = useRef<EventSource | null>(null);
+  const [approvalBusy, setApprovalBusy] = useState<string | null>(null);
 
-  useEffect(() => {
-    let mounted = true;
+  // Run to auto-open in RunsPage when clicking from Mission Control
+  const [requestedRun, setRequestedRun] = useState<Run | null>(null);
 
-    async function boot() {
-      try {
-        const [nextRuns, nextHealth, nextReliability] = await Promise.all([
-          listRuns(),
-          listHealth(),
-          listToolReliability(),
-        ]);
-        if (!mounted) return;
-        setRuns(nextRuns);
-        setHealth(nextHealth);
-        setReliability(nextReliability);
-        if (nextRuns[0]) {
-          await openRun(nextRuns[0]);
-        }
-      } catch (err) {
-        if (mounted) setError(errorMessage(err));
-      }
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const pendingCount = approvals.filter((a) => a.status === "waiting").length;
+
+  // ── Boot + polling ───────────────────────────────────────────────────
+  const refresh = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const [nextRuns, nextHealth, nextApprovals, nextReliability, nextEvents] = await Promise.all([
+        listRuns(),
+        listHealth(),
+        listApprovals(),
+        listToolReliability(),
+        listRecentEvents(30),
+      ]);
+      if (signal?.aborted) return;
+      setRuns(nextRuns);
+      setHealth(nextHealth);
+      setApprovals(nextApprovals);
+      setReliability(nextReliability);
+      setRecentEvents(nextEvents);
+    } catch {
+      // best-effort polling — ignore transient errors
     }
-
-    void boot();
-    return () => {
-      mounted = false;
-      streamRef.current?.close();
-    };
   }, []);
 
-  async function refreshRuns() {
-    const nextRuns = await listRuns();
-    setRuns(nextRuns);
-    return nextRuns;
-  }
+  useEffect(() => {
+    const ctrl = new AbortController();
+    void refresh(ctrl.signal);
+    pollRef.current = setInterval(() => void refresh(ctrl.signal), POLL_MS);
+    return () => {
+      ctrl.abort();
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [refresh]);
 
-  async function refreshHealth() {
-    setHealthRefreshing(true);
-    try {
-      setHealth(await listHealth());
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setHealthRefreshing(false);
-    }
-  }
-
-  async function openRun(run: Run) {
-    streamRef.current?.close();
-    setError(null);
-    setActiveRun(run);
-    setEvents([]);
-    setSelectedEventId(null);
-
-    try {
-      const existing = await getRunEvents(run.run_id);
-      setActiveRun(existing.run);
-      setRuns((current) => upsertRun(current, existing.run));
-      setEvents(existing.events);
-      openEventStream(existing.run.run_id);
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }
-
-  function openEventStream(runId: string) {
-    const source = new EventSource(`/api/runs/${runId}/events/stream`);
-
-    eventTypes.forEach((type) => {
-      source.addEventListener(type, (event) => {
-        const payload = JSON.parse((event as MessageEvent).data) as WatchtowerEvent;
-        setEvents((current) => {
-          if (current.some((item) => item.event_id === payload.event_id)) return current;
-          return [...current, payload];
-        });
-
-        if (isHealthEvent(payload)) void refreshHealth();
-
-        if (
-          payload.type === "tool_call_completed" ||
-          payload.type === "tool_call_failed" ||
-          payload.type === "tool_call_timeout"
-        ) {
-          void listToolReliability().then(setReliability).catch(() => undefined);
-        }
-
-        if (payload.type === "run_completed" || payload.type === "run_failed") {
-          const status = payload.type === "run_completed" ? "completed" : "failed";
-          const completedAt = payload.timestamp;
-          setActiveRun((current) =>
-            current && current.run_id === payload.run_id
-              ? { ...current, status, completed_at: completedAt }
-              : current
-          );
-          setRuns((current) =>
-            current.map((run) =>
-              run.run_id === payload.run_id ? { ...run, status, completed_at: completedAt } : run
-            )
-          );
-          void refreshRuns();
-        }
-      });
-    });
-
-    streamRef.current = source;
-  }
-
-  async function handleStartDemo() {
-    try {
-      setError(null);
-      const run = await startJourneyDemo();
-      setRuns((current) => upsertRun(current, run));
-      await openRun(run);
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }
-
-  async function handleStartSafetyDemo() {
-    try {
-      setError(null);
-      const run = await startSafetyDemo();
-      setRuns((current) => upsertRun(current, run));
-      await openRun(run);
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }
-
+  // ── Shared actions ───────────────────────────────────────────────────
   async function handleDecision(approvalId: string, decision: "approve" | "reject") {
     setApprovalBusy(approvalId);
-    setError(null);
     try {
-      await decideApprovalRequest(approvalId, decision);
-    } catch (err) {
-      setError(errorMessage(err));
+      await decideApproval(approvalId, decision);
+      // Immediately refresh approvals so UI reflects the decision
+      const next = await listApprovals();
+      setApprovals(next);
     } finally {
       setApprovalBusy(null);
     }
   }
 
-  const mode = useMemo(() => getRunMode(activeRun, events), [activeRun, events]);
-  const pendingApproval = useMemo(() => getPendingApproval(events, activeRun), [events, activeRun]);
-  const primaryToolCall = useMemo(() => getPrimaryToolCall(activeRun, events), [activeRun, events]);
-  const routeNodes = useMemo(() => getRouteNodes(activeRun, events), [activeRun, events]);
-  const selectedEvent = useMemo(
-    () => events.find((event) => event.event_id === selectedEventId) ?? null,
-    [events, selectedEventId]
-  );
+  async function handleRefreshHealth() {
+    setHealthRefreshing(true);
+    try {
+      setHealth(await listHealth());
+    } finally {
+      setHealthRefreshing(false);
+    }
+  }
 
+  function handleOpenRunFromMission(run: Run) {
+    setRequestedRun(run);
+    setView("runs");
+  }
+
+  function handleNavigate(nextView: NavView) {
+    setView(nextView);
+    // Kick a refresh when the user switches tabs so data is fresh
+    void refresh();
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────
   return (
-    <main className="appShell">
-      <Header
-        runs={runs}
-        activeRunId={activeRun?.run_id}
-        onOpenRun={(run) => void openRun(run)}
-        onStartDemo={() => void handleStartDemo()}
-        onStartSafetyDemo={() => void handleStartSafetyDemo()}
+    <div className="appShell">
+      <SideNav
+        active={view}
+        pendingCount={pendingCount}
+        onNavigate={handleNavigate}
       />
 
-      {error ? <div className="errorBanner">{error}</div> : null}
+      <div className="pageArea">
+        <PendingBanner
+          count={pendingCount}
+          onViewApprovals={() => handleNavigate("approvals")}
+        />
 
-      {!activeRun ? (
-        <>
-          <EmptyState onStartDemo={() => void handleStartDemo()} onStartSafetyDemo={() => void handleStartSafetyDemo()} />
-          <HealthPanel health={health} refreshing={healthRefreshing} onRefresh={() => void refreshHealth()} />
-          <ReliabilityPanel reliability={reliability} />
-        </>
-      ) : (
-        <>
-          <RunHero
-            run={activeRun}
-            events={events}
+        {view === "mission" && (
+          <MissionControlPage
+            runs={runs}
             health={health}
-            mode={mode}
-            pendingApproval={pendingApproval}
-            primaryToolCall={primaryToolCall}
+            approvals={approvals}
+            reliability={reliability}
+            recentEvents={recentEvents}
             approvalBusy={approvalBusy}
             onDecision={handleDecision}
+            onViewApprovals={() => handleNavigate("approvals")}
+            onOpenRun={handleOpenRunFromMission}
           />
-          <HealthPanel health={health} refreshing={healthRefreshing} onRefresh={() => void refreshHealth()} />
-          <ReliabilityPanel reliability={reliability} />
-          <div className="controlGrid">
-            <div className="primaryStack">
-              <AgentRouteMap nodes={routeNodes} />
-              <EventTimeline
-                events={events}
-                selectedEventId={selectedEventId ?? undefined}
-                onSelectEvent={(event) => setSelectedEventId(event.event_id)}
-              />
-            </div>
-            <InspectorPanel
-              run={activeRun}
-              events={events}
-              health={health}
-              mode={mode}
-              selectedEvent={selectedEvent}
-              pendingApproval={pendingApproval}
-              primaryToolCall={primaryToolCall}
-              approvalBusy={approvalBusy}
-              onDecision={handleDecision}
-            />
-          </div>
-        </>
-      )}
-    </main>
-  );
-}
+        )}
 
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unexpected frontend error";
+        {view === "runs" && (
+          <RunsPage
+            initialRuns={runs}
+            initialHealth={health}
+            initialReliability={reliability}
+            requestedRun={requestedRun}
+            onRunsChange={setRuns}
+          />
+        )}
+
+        {view === "servers" && (
+          <ServersPage
+            health={health}
+            reliability={reliability}
+            refreshing={healthRefreshing}
+            onRefresh={() => void handleRefreshHealth()}
+          />
+        )}
+
+        {view === "approvals" && (
+          <ApprovalsPage
+            approvals={approvals}
+            approvalBusy={approvalBusy}
+            onDecision={handleDecision}
+            onRefresh={() => void refresh()}
+          />
+        )}
+
+        {view === "policies" && <PoliciesPage />}
+        {view === "settings" && <SettingsPage />}
+      </div>
+    </div>
+  );
 }

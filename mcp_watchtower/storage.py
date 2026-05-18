@@ -442,6 +442,15 @@ class SQLiteStore:
             )
             self._conn.commit()
 
+    def list_recent_events(self, limit: int = 30) -> list[EventDict]:
+        """Return the most recent events across all runs, oldest first."""
+        with self._lock:
+            rows = self._conn.execute(
+                "select raw_json from events order by rowid desc limit ?",
+                (limit,),
+            ).fetchall()
+        return [json.loads(row["raw_json"]) for row in reversed(rows)]
+
     def list_tool_reliability(self) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(

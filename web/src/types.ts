@@ -86,6 +86,18 @@ export type TimelineItem = {
   important?: boolean;
 };
 
+export type Approval = {
+  approval_id: string;
+  run_id: string;
+  event_id?: string | null;
+  status: "waiting" | "approved" | "rejected";
+  risk?: string | null;
+  reason?: string | null;
+  decision?: string | null;
+  decided_at?: string | null;
+  created_at: string;
+};
+
 export type ToolReliability = {
   server: string;
   tool: string;
